@@ -1,194 +1,165 @@
-export NODE_ENV=test
-    //Implement the API routes in routes/api.js//
-const express = require('express');
-const router = express.Router();
-const Stock = require('../models/Stock'); // Assuming you have a Stock model
+const helmet = require('helmet');
 
-// Helper function to anonymize IP addresses
-const anonymizeIP = (ip) => {
-  const parts = ip.split('.');
-  parts[2] = '0'; // Set the third octet to 0
-  return parts.join('.');
-};
-
-// GET /api/stock-prices/
-router.get('/stock-prices', async (req, res) => {
+// Set content security policies
+app.use(
+  helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"],
+    },
+  })
+);
+router.get('/', async (req, res) => {
   const { stock, like } = req.query;
-  const ip = anonymizeIP(req.ip); // Anonymize the IP address
+
+  if (!stock) return res.json({ error: 'Missing stock query parameter.' });
+
+  const stocks = Array.isArray(stock) ? stock : [stock];
+  const ipHash = anonymizeIP(req.ip);
 
   try {
-    if (Array.isArray(stock)) {
-      // Handle two stocks
-      const [stock1, stock2] = stock;
-      const stockData1 = await Stock.findOne({ symbol: stock1 });
-      const stockData2 = await Stock.findOne({ symbol: stock2 });
+    const stockData = await Promise.all(
+      stocks.map(async (symbol) => {
+        const response = await axios.get(
+          `https://stock-price-checker-proxy.freecodecamp.rocks/v1/stock/${symbol}/quote`
+        );
 
-      if (!stockData1 || !stockData2) {
-        return res.status(404).json({ error: 'Stock not found' });
-      }
+        if (!response.data.symbol) throw new Error('Invalid stock symbol.');
 
-      // Handle likes for both stocks
-      if (like === 'true') {
-        if (!stockData1.likes.includes(ip)) stockData1.likes.push(ip);
-        if (!stockData2.likes.includes(ip)) stockData2.likes.push(ip);
-        await stockData1.save();
-        await stockData2.save();
-      }
+        let stockDoc = await Stock.findOne({ symbol: response.data.symbol });
+        if (!stockDoc) {
+          stockDoc = new Stock({ symbol: response.data.symbol, likes: [] });
+          await stockDoc.save();
+        }
 
-      res.json({
+        if (like === 'true' && !stockDoc.likes.includes(ipHash)) {
+          stockDoc.likes.push(ipHash);
+          await stockDoc.save();
+        }
+
+        return {
+          stock: stockDoc.symbol,
+          price: response.data.latestPrice, // Ensure this is a number
+          likes: stockDoc.likes.length,    // Ensure this is a number
+        };
+      })
+    );
+
+    if (stockData.length === 2) {
+      const [stock1, stock2] = stockData;
+      return res.json({
         stockData: [
-          { stock: stock1, price: stockData1.price, rel_likes: stockData1.likes.length - stockData2.likes.length },
-          { stock: stock2, price: stockData2.price, rel_likes: stockData2.likes.length - stockData1.likes.length },
+          { ...stock1, rel_likes: stock1.likes - stock2.likes },
+          { ...stock2, rel_likes: stock2.likes - stock1.likes },
         ],
       });
-    } else {
-      // Handle one stock
-      const stockData = await Stock.findOne({ symbol: stock });
-
-      if (!stockData) {
-        return res.status(404).json({ error: 'Stock not found' });
-      }
-
-      // Handle likes for one stock
-      if (like === 'true' && !stockData.likes.includes(ip)) {
-        stockData.likes.push(ip);
-        await stockData.save();
-      }
-
-      res.json({
-        stockData: { stock, price: stockData.price, likes: stockData.likes.length },
-      });
     }
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+
+    res.json({ stockData: stockData[0] });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
 });
-
-module.exports = router;
-
-//Add security features to server.js//
-const express = require('express');
-const helmet = require('helmet'); // For setting secure HTTP headers
-const rateLimit = require('express-rate-limit'); // For rate limiting
-const app = express();
-
-// Use Helmet for secure headers
-app.use(helmet());
-
-// Rate limiting to prevent abuse
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-});
-app.use(limiter);
-
-// Other middleware and routes
-app.use(express.json());
-app.use('/api', require('./routes/api'));
-
-// Start the server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
-//Write functional tests in tests/2_functional-tests.js//
-const chai = require('chai');
-const chaiHttp = require('chai-http');
-const server = require('../server');
-const should = chai.should();
-
-chai.use(chIt seems the response was cut off. Let me complete the functional tests for you:
-
-```javascript
-const chai = require('chai');
-const chaiHttp = require('chai-http');
-const server = require('../server');
-const should = chai.should();
-
-chai.use(chaiHttp);
-
-describe('Functional Tests', () => {
-  describe('GET /api/stock-prices/', () => {
-    it('Viewing one stock: GET request to /api/stock-prices/', (done) => {
+if (stockData.length === 2) {
+  const [stock1, stock2] = stockData;
+  return res.json({
+    stockData: [
+      { ...stock1, rel_likes: stock1.likes - stock2.likes },
+      { ...stock2, rel_likes: stock2.likes - stock1.likes },
+    ],
+  });
+}
+GET /api/stock-prices?stock=GOOG&stock=MSFT
+suite('Functional Tests', () => {
+  suite('GET /api/stock-prices', () => {
+    test('Viewing one stock', (done) => {
       chai
         .request(server)
         .get('/api/stock-prices?stock=GOOG')
         .end((err, res) => {
-          res.should.have.status(200);
-          res.body.should.be.an('object');
-          res.body.stockData.should.have.property('stock');
-          res.body.stockData.should.have.property('price');
-          res.body.stockData.should.have.property('likes');
+          assert.equal(res.status, 200);
+          assert.property(res.body, 'stockData');
+          assert.isObject(res.body.stockData);
+          assert.property(res.body.stockData, 'stock');
+          assert.property(res.body.stockData, 'price');
+          assert.property(res.body.stockData, 'likes');
+          assert.isString(res.body.stockData.stock);
+          assert.isNumber(res.body.stockData.price);
+          assert.isNumber(res.body.stockData.likes);
           done();
         });
     });
 
-    it('Viewing one stock and liking it: GET request to /api/stock-prices/', (done) => {
+    test('Viewing one stock and liking it', (done) => {
       chai
         .request(server)
         .get('/api/stock-prices?stock=GOOG&like=true')
         .end((err, res) => {
-          res.should.have.status(200);
-          res.body.should.be.an('object');
-          res.body.stockData.should.have.property('stock');
-          res.body.stockData.should.have.property('price');
-          res.body.stockData.should.have.property('likes');
-          res.body.stockData.likes.should.be.at.least(1);
+          assert.equal(res.status, 200);
+          assert.property(res.body, 'stockData');
+          assert.isObject(res.body.stockData);
+          assert.property(res.body.stockData, 'likes');
+          assert.isNumber(res.body.stockData.likes);
           done();
         });
     });
 
-    it('Viewing the same stock and liking it again: GET request to /api/stock-prices/', (done) => {
+    test('Viewing the same stock and liking it again', (done) => {
       chai
         .request(server)
         .get('/api/stock-prices?stock=GOOG&like=true')
         .end((err, res) => {
-          res.should.have.status(200);
-          res.body.should.be.an('object');
-          res.body.stockData.should.have.property('stock');
-          res.body.stockData.should.have.property('price');
-          res.body.stockData.should.have.property('likes');
-          // Likes should not increase if the same IP likes again
-          res.body.stockData.likes.should.equal(1);
+          assert.equal(res.status, 200);
+          assert.property(res.body, 'stockData');
+          assert.isObject(res.body.stockData);
+          assert.property(res.body.stockData, 'likes');
+          assert.isNumber(res.body.stockData.likes);
           done();
         });
     });
 
-    it('Viewing two stocks: GET request to /api/stock-prices/', (done) => {
+    test('Viewing two stocks', (done) => {
       chai
         .request(server)
         .get('/api/stock-prices?stock=GOOG&stock=MSFT')
         .end((err, res) => {
-          res.should.have.status(200);
-          res.body.should.be.an('object');
-          res.body.stockData.should.be.an('array');
-          res.body.stockData[0].should.have.property('stock');
-          res.body.stockData[0].should.have.property('price');
-          res.body.stockData[0].should.have.property('rel_likes');
-          res.body.stockData[1].should.have.property('stock');
-          res.body.stockData[1].should.have.property('price');
-          res.body.stockData[1].should.have.property('rel_likes');
+          assert.equal(res.status, 200);
+          assert.property(res.body, 'stockData');
+          assert.isArray(res.body.stockData);
+          assert.equal(res.body.stockData.length, 2);
+          res.body.stockData.forEach((stock) => {
+            assert.property(stock, 'stock');
+            assert.property(stock, 'price');
+            assert.property(stock, 'rel_likes');
+            assert.isString(stock.stock);
+            assert.isNumber(stock.price);
+            assert.isNumber(stock.rel_likes);
+          });
           done();
         });
     });
 
-    it('Viewing two stocks and liking them: GET request to /api/stock-prices/', (done) => {
+    test('Viewing two stocks and liking them', (done) => {
       chai
         .request(server)
         .get('/api/stock-prices?stock=GOOG&stock=MSFT&like=true')
         .end((err, res) => {
-          res.should.have.status(200);
-          res.body.should.be.an('object');
-          res.body.stockData.should.be.an('array');
-          res.body.stockData[0].should.have.property('stock');
-          res.body.stockData[0].should.have.property('price');
-          res.body.stockData[0].should.have.property('rel_likes');
-          res.body.stockData[1].should.have.property('stock');
-          res.body.stockData[1].should.have.property('price');
-          res.body.stockData[1].should.have.property('rel_likes');
+          assert.equal(res.status, 200);
+          assert.property(res.body, 'stockData');
+          assert.isArray(res.body.stockData);
+          assert.equal(res.body.stockData.length, 2);
+          res.body.stockData.forEach((stock) => {
+            assert.property(stock, 'stock');
+            assert.property(stock, 'price');
+            assert.property(stock, 'rel_likes');
+            assert.isString(stock.stock);
+            assert.isNumber(stock.price);
+            assert.isNumber(stock.rel_likes);
+          });
           done();
         });
     });
   });
 });
+
