@@ -1,0 +1,194 @@
+export NODE_ENV=test
+    //Implement the API routes in routes/api.js//
+const express = require('express');
+const router = express.Router();
+const Stock = require('../models/Stock'); // Assuming you have a Stock model
+
+// Helper function to anonymize IP addresses
+const anonymizeIP = (ip) => {
+  const parts = ip.split('.');
+  parts[2] = '0'; // Set the third octet to 0
+  return parts.join('.');
+};
+
+// GET /api/stock-prices/
+router.get('/stock-prices', async (req, res) => {
+  const { stock, like } = req.query;
+  const ip = anonymizeIP(req.ip); // Anonymize the IP address
+
+  try {
+    if (Array.isArray(stock)) {
+      // Handle two stocks
+      const [stock1, stock2] = stock;
+      const stockData1 = await Stock.findOne({ symbol: stock1 });
+      const stockData2 = await Stock.findOne({ symbol: stock2 });
+
+      if (!stockData1 || !stockData2) {
+        return res.status(404).json({ error: 'Stock not found' });
+      }
+
+      // Handle likes for both stocks
+      if (like === 'true') {
+        if (!stockData1.likes.includes(ip)) stockData1.likes.push(ip);
+        if (!stockData2.likes.includes(ip)) stockData2.likes.push(ip);
+        await stockData1.save();
+        await stockData2.save();
+      }
+
+      res.json({
+        stockData: [
+          { stock: stock1, price: stockData1.price, rel_likes: stockData1.likes.length - stockData2.likes.length },
+          { stock: stock2, price: stockData2.price, rel_likes: stockData2.likes.length - stockData1.likes.length },
+        ],
+      });
+    } else {
+      // Handle one stock
+      const stockData = await Stock.findOne({ symbol: stock });
+
+      if (!stockData) {
+        return res.status(404).json({ error: 'Stock not found' });
+      }
+
+      // Handle likes for one stock
+      if (like === 'true' && !stockData.likes.includes(ip)) {
+        stockData.likes.push(ip);
+        await stockData.save();
+      }
+
+      res.json({
+        stockData: { stock, price: stockData.price, likes: stockData.likes.length },
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+module.exports = router;
+
+//Add security features to server.js//
+const express = require('express');
+const helmet = require('helmet'); // For setting secure HTTP headers
+const rateLimit = require('express-rate-limit'); // For rate limiting
+const app = express();
+
+// Use Helmet for secure headers
+app.use(helmet());
+
+// Rate limiting to prevent abuse
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
+
+// Other middleware and routes
+app.use(express.json());
+app.use('/api', require('./routes/api'));
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+//Write functional tests in tests/2_functional-tests.js//
+const chai = require('chai');
+const chaiHttp = require('chai-http');
+const server = require('../server');
+const should = chai.should();
+
+chai.use(chIt seems the response was cut off. Let me complete the functional tests for you:
+
+```javascript
+const chai = require('chai');
+const chaiHttp = require('chai-http');
+const server = require('../server');
+const should = chai.should();
+
+chai.use(chaiHttp);
+
+describe('Functional Tests', () => {
+  describe('GET /api/stock-prices/', () => {
+    it('Viewing one stock: GET request to /api/stock-prices/', (done) => {
+      chai
+        .request(server)
+        .get('/api/stock-prices?stock=GOOG')
+        .end((err, res) => {
+          res.should.have.status(200);
+          res.body.should.be.an('object');
+          res.body.stockData.should.have.property('stock');
+          res.body.stockData.should.have.property('price');
+          res.body.stockData.should.have.property('likes');
+          done();
+        });
+    });
+
+    it('Viewing one stock and liking it: GET request to /api/stock-prices/', (done) => {
+      chai
+        .request(server)
+        .get('/api/stock-prices?stock=GOOG&like=true')
+        .end((err, res) => {
+          res.should.have.status(200);
+          res.body.should.be.an('object');
+          res.body.stockData.should.have.property('stock');
+          res.body.stockData.should.have.property('price');
+          res.body.stockData.should.have.property('likes');
+          res.body.stockData.likes.should.be.at.least(1);
+          done();
+        });
+    });
+
+    it('Viewing the same stock and liking it again: GET request to /api/stock-prices/', (done) => {
+      chai
+        .request(server)
+        .get('/api/stock-prices?stock=GOOG&like=true')
+        .end((err, res) => {
+          res.should.have.status(200);
+          res.body.should.be.an('object');
+          res.body.stockData.should.have.property('stock');
+          res.body.stockData.should.have.property('price');
+          res.body.stockData.should.have.property('likes');
+          // Likes should not increase if the same IP likes again
+          res.body.stockData.likes.should.equal(1);
+          done();
+        });
+    });
+
+    it('Viewing two stocks: GET request to /api/stock-prices/', (done) => {
+      chai
+        .request(server)
+        .get('/api/stock-prices?stock=GOOG&stock=MSFT')
+        .end((err, res) => {
+          res.should.have.status(200);
+          res.body.should.be.an('object');
+          res.body.stockData.should.be.an('array');
+          res.body.stockData[0].should.have.property('stock');
+          res.body.stockData[0].should.have.property('price');
+          res.body.stockData[0].should.have.property('rel_likes');
+          res.body.stockData[1].should.have.property('stock');
+          res.body.stockData[1].should.have.property('price');
+          res.body.stockData[1].should.have.property('rel_likes');
+          done();
+        });
+    });
+
+    it('Viewing two stocks and liking them: GET request to /api/stock-prices/', (done) => {
+      chai
+        .request(server)
+        .get('/api/stock-prices?stock=GOOG&stock=MSFT&like=true')
+        .end((err, res) => {
+          res.should.have.status(200);
+          res.body.should.be.an('object');
+          res.body.stockData.should.be.an('array');
+          res.body.stockData[0].should.have.property('stock');
+          res.body.stockData[0].should.have.property('price');
+          res.body.stockData[0].should.have.property('rel_likes');
+          res.body.stockData[1].should.have.property('stock');
+          res.body.stockData[1].should.have.property('price');
+          res.body.stockData[1].should.have.property('rel_likes');
+          done();
+        });
+    });
+  });
+});
