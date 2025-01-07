@@ -1,7 +1,29 @@
+if (stockData.length === 2) {
+  const [stock1, stock2] = stockData;
+  return res.json({
+    stockData: [
+      { ...stock1, rel_likes: stock1.likes - stock2.likes },
+      { ...stock2, rel_likes: stock2.likes - stock1.likes },
+    ],
+  });
+}
+const server = require('../server'); // Ensure this is pointing to your app's server file
+try {
+  const response = await axios.get(url);
+  if (response.status !== 200) throw new Error('Invalid API response.');
+} catch (error) {
+  console.error('API error:', error.message);
+  return res.status(400).json({ error: 'Failed to fetch stock data.' });
+}
 const helmet = require('helmet');
+const express = require('express');
+const axios = require('axios');
+const router = express.Router();
+const Stock = require('./models/Stock'); // Assuming Mongoose model for stock data
+const anonymizeIP = require('./utils/anonymizeIP'); // Your IP anonymization utility
 
 // Set content security policies
-app.use(
+router.use(
   helmet.contentSecurityPolicy({
     directives: {
       defaultSrc: ["'self'"],
@@ -10,10 +32,11 @@ app.use(
     },
   })
 );
-router.get('/', async (req, res) => {
+
+router.get('/api/stock-prices', async (req, res) => {
   const { stock, like } = req.query;
 
-  if (!stock) return res.json({ error: 'Missing stock query parameter.' });
+  if (!stock) return res.status(400).json({ error: 'Missing stock query parameter.' });
 
   const stocks = Array.isArray(stock) ? stock : [stock];
   const ipHash = anonymizeIP(req.ip);
@@ -25,7 +48,7 @@ router.get('/', async (req, res) => {
           `https://stock-price-checker-proxy.freecodecamp.rocks/v1/stock/${symbol}/quote`
         );
 
-        if (!response.data.symbol) throw new Error('Invalid stock symbol.');
+        if (!response.data.symbol) throw new Error(`Stock symbol "${symbol}" not found.`);
 
         let stockDoc = await Stock.findOne({ symbol: response.data.symbol });
         if (!stockDoc) {
@@ -40,8 +63,8 @@ router.get('/', async (req, res) => {
 
         return {
           stock: stockDoc.symbol,
-          price: response.data.latestPrice, // Ensure this is a number
-          likes: stockDoc.likes.length,    // Ensure this is a number
+          price: parseFloat(response.data.latestPrice), // Ensure price is a number
+          likes: stockDoc.likes.length,
         };
       })
     );
@@ -58,108 +81,13 @@ router.get('/', async (req, res) => {
 
     res.json({ stockData: stockData[0] });
   } catch (error) {
+    console.error('Error in stock route:', error.message);
     res.status(400).json({ error: error.message });
   }
 });
-if (stockData.length === 2) {
-  const [stock1, stock2] = stockData;
-  return res.json({
-    stockData: [
-      { ...stock1, rel_likes: stock1.likes - stock2.likes },
-      { ...stock2, rel_likes: stock2.likes - stock1.likes },
-    ],
-  });
-}
-GET /api/stock-prices?stock=GOOG&stock=MSFT
-suite('Functional Tests', () => {
-  suite('GET /api/stock-prices', () => {
-    test('Viewing one stock', (done) => {
-      chai
-        .request(server)
-        .get('/api/stock-prices?stock=GOOG')
-        .end((err, res) => {
-          assert.equal(res.status, 200);
-          assert.property(res.body, 'stockData');
-          assert.isObject(res.body.stockData);
-          assert.property(res.body.stockData, 'stock');
-          assert.property(res.body.stockData, 'price');
-          assert.property(res.body.stockData, 'likes');
-          assert.isString(res.body.stockData.stock);
-          assert.isNumber(res.body.stockData.price);
-          assert.isNumber(res.body.stockData.likes);
-          done();
-        });
-    });
 
-    test('Viewing one stock and liking it', (done) => {
-      chai
-        .request(server)
-        .get('/api/stock-prices?stock=GOOG&like=true')
-        .end((err, res) => {
-          assert.equal(res.status, 200);
-          assert.property(res.body, 'stockData');
-          assert.isObject(res.body.stockData);
-          assert.property(res.body.stockData, 'likes');
-          assert.isNumber(res.body.stockData.likes);
-          done();
-        });
-    });
+module.exports = router;
+npm start # Ensure the server is running
+npm test  # Run your functional tests
 
-    test('Viewing the same stock and liking it again', (done) => {
-      chai
-        .request(server)
-        .get('/api/stock-prices?stock=GOOG&like=true')
-        .end((err, res) => {
-          assert.equal(res.status, 200);
-          assert.property(res.body, 'stockData');
-          assert.isObject(res.body.stockData);
-          assert.property(res.body.stockData, 'likes');
-          assert.isNumber(res.body.stockData.likes);
-          done();
-        });
-    });
-
-    test('Viewing two stocks', (done) => {
-      chai
-        .request(server)
-        .get('/api/stock-prices?stock=GOOG&stock=MSFT')
-        .end((err, res) => {
-          assert.equal(res.status, 200);
-          assert.property(res.body, 'stockData');
-          assert.isArray(res.body.stockData);
-          assert.equal(res.body.stockData.length, 2);
-          res.body.stockData.forEach((stock) => {
-            assert.property(stock, 'stock');
-            assert.property(stock, 'price');
-            assert.property(stock, 'rel_likes');
-            assert.isString(stock.stock);
-            assert.isNumber(stock.price);
-            assert.isNumber(stock.rel_likes);
-          });
-          done();
-        });
-    });
-
-    test('Viewing two stocks and liking them', (done) => {
-      chai
-        .request(server)
-        .get('/api/stock-prices?stock=GOOG&stock=MSFT&like=true')
-        .end((err, res) => {
-          assert.equal(res.status, 200);
-          assert.property(res.body, 'stockData');
-          assert.isArray(res.body.stockData);
-          assert.equal(res.body.stockData.length, 2);
-          res.body.stockData.forEach((stock) => {
-            assert.property(stock, 'stock');
-            assert.property(stock, 'price');
-            assert.property(stock, 'rel_likes');
-            assert.isString(stock.stock);
-            assert.isNumber(stock.price);
-            assert.isNumber(stock.rel_likes);
-          });
-          done();
-        });
-    });
-  });
-});
 
